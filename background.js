@@ -342,19 +342,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendChatMessage(message.text, message.img).then(ok => sendResponse({ ok }));
       return true;
     case 'isRead':
-      sendResponse({ read: readIds.indexOf(message.id) !== -1 });
-      break;
-    case 'markRead':
-      (message.ids || []).forEach(id => {
-        if (readIds.indexOf(id) === -1) readIds.push(id);
+      chrome.storage.session.get('readIds', (r) => {
+        var ids = r.readIds || [];
+        sendResponse({ read: ids.indexOf(message.id) !== -1 });
       });
-      if (readIds.length > 200) readIds = readIds.slice(-200);
-      var lastReadTime = Date.now();
-      chrome.storage.session.set({ readIds: readIds.slice(), lastReadTime: lastReadTime });
-      // Broadcast to all tabs so they clear their unread indicator.
-      chrome.runtime.sendMessage({ action: 'readUpdate', ids: readIds.slice(), lastReadTime: lastReadTime }, function() {});
-      sendResponse({ ok: true });
-      break;
+      return true;
+    case 'markRead':
+      chrome.storage.session.get('readIds', (r) => {
+        var ids = r.readIds || [];
+        (message.ids || []).forEach(id => {
+          if (ids.indexOf(id) === -1) ids.push(id);
+        });
+        if (ids.length > 200) ids = ids.slice(-200);
+        readIds = ids;
+        var lastReadTime = Date.now();
+        chrome.storage.session.set({ readIds: ids.slice(), lastReadTime: lastReadTime }, () => {
+          chrome.runtime.sendMessage({ action: 'readUpdate', ids: ids.slice(), lastReadTime: lastReadTime }, function() {});
+          sendResponse({ ok: true });
+        });
+      });
+      return true;
   }
 });
 
