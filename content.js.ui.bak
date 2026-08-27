@@ -1,0 +1,179 @@
+﻿// ChatRoom 666 - Content Script
+// Floating button on web pages, hover to show chat panel (UI copied from popup, features not wired yet)
+
+(function() {
+  'use strict';
+
+  var widgetEl = null;
+  var toggleBtn = null;
+  var hideTimer = null;
+
+  function createToggleButton() {
+    toggleBtn = document.createElement('div');
+    toggleBtn.id = 'chatroom666-toggle';
+    toggleBtn.style.cssText = 'position:fixed;bottom:20px;right:20px;width:44px;height:44px;border-radius:50%;background:#2a2a2a;color:#ccc;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2147483647;box-shadow:0 2px 10px rgba(0,0,0,.5);font-size:11px;font-weight:700;transition:transform .2s,background .2s;user-select:none;border:1px solid #444;';
+    toggleBtn.textContent = '666';
+    toggleBtn.title = 'ChatRoom 666';
+    toggleBtn.addEventListener('mouseenter', function() {
+      clearTimeout(hideTimer);
+      toggleBtn.style.transform = 'scale(1.08)';
+      toggleBtn.style.background = '#3a3a3a';
+      showWidget();
+    });
+    toggleBtn.addEventListener('mouseleave', function() {
+      scheduleHide();
+    });
+    document.body.appendChild(toggleBtn);
+  }
+
+  // Build the chat panel UI, copied from popup.html
+  function buildPanelHTML() {
+    return '' +
+      '<div class="cr666-header">' +
+        '<div class="cr666-room-info">' +
+          '<span class="cr666-online" id="cr666-online-btn">Online <span id="cr666-online-count">0</span></span>' +
+        '</div>' +
+        '<div class="cr666-header-actions">' +
+          '<button id="cr666-rename-btn">Rename</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="cr666-messages" id="cr666-messages"></div>' +
+      '<div class="cr666-emoji-panel" id="cr666-emoji-panel">' +
+        '<div class="cr666-emoji-tabs" style="display:flex;gap:10px;margin-bottom:8px;align-items:center">' +
+          '<span class="cr666-emoji-tab active" id="cr666-tab-basic" style="font-size:12px;color:#fff;background:#333;padding:3px 8px;border-radius:4px;cursor:pointer">Basic</span>' +
+          '<span class="cr666-emoji-tab" id="cr666-tab-custom" style="font-size:12px;color:#888;padding:3px 8px;border-radius:4px;cursor:pointer">Custom</span>' +
+          '<span id="cr666-emoji-add" style="margin-left:auto;font-size:18px;color:#888;cursor:pointer;padding:2px 8px">+</span>' +
+        '</div>' +
+        '<div class="cr666-emoji-grid" id="cr666-emoji-grid"></div>' +
+        '<input type="file" id="cr666-emoji-file-input" accept="image/*" style="display:none">' +
+      '</div>' +
+      '<div class="cr666-img-preview" id="cr666-img-preview" style="display:none"></div>' +
+      '<div class="cr666-input-area">' +
+        '<input type="text" id="cr666-msg-input" placeholder="Type a message..." maxlength="2000">' +
+        '<button class="cr666-emoji-toggle" id="cr666-emoji-toggle" title="Emoji">&#128512;</button>' +
+        '<button class="cr666-p-btn" id="cr666-p-btn" title="Send Image">P</button>' +
+        '<input type="file" id="cr666-img-file-input" accept="image/*" style="display:none">' +
+        '<button class="cr666-send-btn" id="cr666-send-btn">Send</button>' +
+      '</div>' +
+      '<div class="cr666-overlay" id="cr666-userlist-overlay"><div class="cr666-modal-box"><h3>Online Users <span class="cr666-close" id="cr666-userlist-close">&times;</span></h3><div class="cr666-userlist-items" id="cr666-userlist-items"></div></div></div>' +
+      '<div class="cr666-overlay" id="cr666-rename-overlay"><div class="cr666-modal-box"><h3>Rename <span class="cr666-close" id="cr666-rename-close">&times;</span></h3><input type="text" id="cr666-rename-input" placeholder="New name" maxlength="20"><button class="cr666-modal-btn" id="cr666-rename-save">Save</button></div></div>' +
+      '<div class="cr666-error-toast" id="cr666-error-toast"></div>';
+  }
+
+  // Styles copied from popup.html, scoped under #chatroom666-widget to avoid leaking into the host page
+  function buildPanelCSS() {
+    var s = '#chatroom666-widget ';
+    return [
+      s + '{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#111;color:#e0e0e0;display:flex;flex-direction:column;overflow:hidden}',
+      s + '::-webkit-scrollbar{width:5px}',
+      s + '::-webkit-scrollbar-track{background:transparent}',
+      s + '::-webkit-scrollbar-thumb{background:#333;border-radius:3px}',
+      s + '::-webkit-scrollbar-thumb:hover{background:#555}',
+      s + '.cr666-header{background:#1c1c1c;border-bottom:1px solid #2e2e2e;padding:12px 16px;display:flex;align-items:center;justify-content:center;position:relative;flex-shrink:0}',
+      s + '.cr666-room-info{display:flex;align-items:center;gap:10px}',
+      s + '.cr666-online{font-size:12px;color:#888;cursor:pointer;text-decoration:underline dotted}',
+      s + '.cr666-online span{color:#4ade80}',
+      s + '.cr666-header-actions{position:absolute;right:16px;display:flex;gap:6px}',
+      s + '.cr666-header-actions button{padding:3px 10px;border:1px solid #444;border-radius:6px;background:transparent;color:#aaa;cursor:pointer;font-size:11px;transition:all .2s}',
+      s + '.cr666-header-actions button:hover{border-color:#888;color:#ccc}',
+      s + '.cr666-messages{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px}',
+      s + '.cr666-msg-row{display:flex;align-items:flex-start;gap:8px;max-width:85%;animation:cr666-fadeIn .15s ease}',
+      '@keyframes cr666-fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}',
+      s + '.cr666-msg-row.self{align-self:flex-end;flex-direction:row-reverse}',
+      s + '.cr666-msg-row.other{align-self:flex-start}',
+      s + '.cr666-avatar{width:30px;height:30px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;border:1px solid #444}',
+      s + '.cr666-msg-body{display:flex;flex-direction:column;gap:2px}',
+      s + '.cr666-msg-row.self .cr666-msg-body{align-items:flex-end}',
+      s + '.cr666-msg-row.other .cr666-msg-body{align-items:flex-start}',
+      s + '.cr666-msg-line{display:flex;align-items:center;gap:6px}',
+      s + '.cr666-msg-row.self .cr666-msg-line{flex-direction:row-reverse}',
+      s + '.cr666-msg-name{font-size:11px;font-weight:600;color:#888;white-space:nowrap}',
+      s + '.cr666-msg-bubble{padding:8px 12px;border-radius:12px;font-size:13px;line-height:1.5;word-break:break-word}',
+      s + '.cr666-msg-row.self .cr666-msg-bubble{background:#3a3a3a;color:#fff;border-top-right-radius:4px}',
+      s + '.cr666-msg-row.other .cr666-msg-bubble{background:#2e2e2e;color:#e0e0e0;border-top-left-radius:4px}',
+      s + '.cr666-msg-time{font-size:10px;color:#555}',
+      s + '.cr666-msg.system{align-self:center;color:#666;font-size:11px;padding:2px}',
+      s + '.cr666-emoji-panel{background:#1c1c1c;border-top:1px solid #2e2e2e;padding:10px 12px;max-height:160px;overflow-y:auto;flex-shrink:0;display:none}',
+      s + '.cr666-emoji-grid{display:grid;grid-template-columns:repeat(10,1fr);gap:2px}',
+      s + '.cr666-emoji-item{font-size:20px;cursor:pointer;padding:2px;text-align:center;border-radius:4px;transition:background .15s}',
+      s + '.cr666-emoji-item:hover{background:#333}',
+      s + '.cr666-img-preview{background:#1c1c1c;padding:8px 12px;border-top:1px solid #2e2e2e;position:relative;flex-shrink:0}',
+      s + '.cr666-img-preview img{max-height:100px;border-radius:8px;display:block}',
+      s + '.cr666-img-preview .cr666-remove-img{position:absolute;top:5px;right:8px;background:rgba(0,0,0,.6);color:#fff;border:none;width:20px;height:20px;border-radius:50%;cursor:pointer;font-size:12px;line-height:1}',
+      s + '.cr666-input-area{background:#1c1c1c;border-top:1px solid #2e2e2e;padding:10px 12px;display:flex;gap:8px;flex-shrink:0}',
+      s + '.cr666-input-area input{flex:1;padding:10px 12px;border:1px solid #444;border-radius:8px;background:#141414;color:#fff;font-size:13px;outline:none;transition:border-color .2s}',
+      s + '.cr666-input-area input:focus{border-color:#888}',
+      s + '.cr666-p-btn{width:38px;height:38px;border:1px solid #444;border-radius:8px;background:#1c1c1c;color:#aaa;font-size:16px;font-weight:700;cursor:pointer;transition:all .2s;line-height:1;display:flex;align-items:center;justify-content:center}',
+      s + '.cr666-p-btn:hover{border-color:#888;color:#fff}',
+      s + '.cr666-emoji-toggle{width:38px;height:38px;border:1px solid #444;border-radius:8px;background:#1c1c1c;color:#aaa;font-size:18px;cursor:pointer;transition:all .2s;line-height:1;display:flex;align-items:center;justify-content:center}',
+      s + '.cr666-emoji-toggle:hover{border-color:#888;color:#fff}',
+      s + '.cr666-send-btn{padding:10px 16px;border:none;border-radius:8px;background:#555;color:#fff;font-size:13px;font-weight:600;cursor:pointer;transition:opacity .2s}',
+      s + '.cr666-send-btn:hover{opacity:.85}',
+      s + '.cr666-overlay{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);z-index:200;display:none;align-items:center;justify-content:center}',
+      s + '.cr666-overlay.show{display:flex}',
+      s + '.cr666-modal-box{background:#1c1c1c;border:1px solid #2e2e2e;border-radius:12px;padding:18px;width:85%;max-width:300px;max-height:60vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.6)}',
+      s + '.cr666-modal-box h3{font-size:14px;margin-bottom:12px;color:#888;display:flex;justify-content:space-between;align-items:center}',
+      s + '.cr666-modal-box .cr666-close{cursor:pointer;color:#888;font-size:16px;line-height:1}',
+      s + '.cr666-modal-box .cr666-close:hover{color:#ef4444}',
+      s + '.cr666-modal-box input{width:100%;padding:10px 12px;border:1px solid #444;border-radius:8px;background:#141414;color:#fff;font-size:13px;outline:none;margin-bottom:10px}',
+      s + '.cr666-modal-box input:focus{border-color:#888}',
+      s + '.cr666-modal-box .cr666-modal-btn{width:100%;padding:10px;border:none;border-radius:8px;background:#555;color:#fff;font-size:13px;font-weight:600;cursor:pointer}',
+      s + '.cr666-modal-box .cr666-modal-btn:hover{opacity:.85}',
+      s + '.cr666-userlist-items{overflow-y:auto;display:flex;flex-direction:column;gap:6px}',
+      s + '.cr666-userlist-item{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:8px;background:#141414}',
+      s + '.cr666-userlist-item .cr666-avatar{width:26px;height:26px;font-size:12px}',
+      s + '.cr666-userlist-item .cr666-uname{font-size:13px;color:#e0e0e0}',
+      s + '.cr666-error-toast{position:absolute;top:16px;left:50%;transform:translateX(-50%);background:#ef4444;color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;z-index:300;display:none}'
+    ].join('\n');
+  }
+
+  function createWidget() {
+    widgetEl = document.createElement('div');
+    widgetEl.id = 'chatroom666-widget';
+    widgetEl.style.cssText = 'position:fixed;bottom:72px;right:20px;width:380px;height:540px;border:1px solid #333;border-radius:10px;z-index:2147483647;display:none;box-shadow:0 6px 24px rgba(0,0,0,.6);overflow:hidden;';
+
+    // Inject scoped styles
+    var styleEl = document.createElement('style');
+    styleEl.id = 'chatroom666-style';
+    styleEl.textContent = buildPanelCSS();
+    widgetEl.appendChild(styleEl);
+
+    // Inject panel markup
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;flex-direction:column;flex:1;overflow:hidden;height:100%;';
+    wrap.innerHTML = buildPanelHTML();
+    widgetEl.appendChild(wrap);
+
+    // Hover events on widget
+    widgetEl.addEventListener('mouseenter', function() { clearTimeout(hideTimer); });
+    widgetEl.addEventListener('mouseleave', function() { scheduleHide(); });
+
+    document.body.appendChild(widgetEl);
+  }
+
+  function showWidget() {
+    if (!widgetEl) createWidget();
+    widgetEl.style.display = 'block';
+  }
+
+  function hideWidget() {
+    if (widgetEl) widgetEl.style.display = 'none';
+    if (toggleBtn) { toggleBtn.style.transform = 'scale(1)'; toggleBtn.style.background = '#2a2a2a'; }
+  }
+
+  function scheduleHide() {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(hideWidget, 500);
+  }
+
+  function init() {
+    if (document.getElementById('chatroom666-toggle')) return;
+    createToggleButton();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
