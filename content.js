@@ -259,7 +259,7 @@
     if (isSelf) { nm.style.cursor = 'pointer'; nm.title = 'Click to rename'; nm.onclick = function() { showRenameModal(); }; }
     line.appendChild(nm);
     var bub = document.createElement('div'); bub.className = 'cr666-msg-bubble';
-if (msg.img) { bub.style.background = 'transparent'; bub.style.boxShadow = 'none'; var isWechatEmoji = msg.img.indexOf('/emojis/') === 0; var img = document.createElement('img');
+if (msg.img) { bub.style.background = 'transparent'; bub.style.boxShadow = 'none'; var isWechatEmoji = msg.img.indexOf('/emojis/') !== -1; var img = document.createElement('img');
       img.src = msg.img; 
       img.style.cssText = 'max-width:' + (isWechatEmoji ? '20px' : '180px') + ';max-height:' + (isWechatEmoji ? '20px' : '180px') + ';border-radius:12px;cursor:pointer;transition:transform .2s,box-shadow .2s;';
       img.onmouseenter = function() { img.style.transform = 'scale(1.03)'; img.style.boxShadow = '0 4px 16px rgba(0,0,0,.25)'; };
@@ -340,7 +340,7 @@ if (msg.img) { bub.style.background = 'transparent'; bub.style.boxShadow = 'none
     var img = pendingImg;
     if (!text && !img) return;
     chrome.runtime.sendMessage({ action: 'sendChat', text: text, img: img || null }, function(resp) {
-      if (resp && resp.ok) { input.value = ''; pendingImg = ''; var pv = $('cr666-img-preview'); pv.style.display = 'none'; pv.innerHTML = ''; }
+      if (resp && resp.ok) { input.value = ''; pendingImg = ''; input.focus(); var pv = $('cr666-img-preview'); pv.style.display = 'none'; pv.innerHTML = ''; }
       else { showToast('Failed to send - not connected'); }
     });
   }
@@ -397,7 +397,7 @@ if (msg.img) { bub.style.background = 'transparent'; bub.style.boxShadow = 'none
   function sendEmoji(emoji) {
     var isImg = emoji.indexOf('data:image') === 0;
     var isWechat = !isImg && WECHAT_EMOJIS.some(function(e) { return e.name === emoji; });
-    var img = isImg ? emoji : (isWechat ? wechatEmojiUrl(WECHAT_EMOJIS.find(function(e) { return e.name === emoji; })) : null);
+    var img = isImg ? emoji : (isWechat ? wechatEmojiSendUrl(WECHAT_EMOJIS.find(function(e) { return e.name === emoji; })) : null);
     chrome.runtime.sendMessage({ action: 'sendChat', text: img ? '' : emoji, img: img }, function(resp) {
       if (resp && resp.ok) {
         pushRecentEmoji(emoji);
@@ -556,6 +556,9 @@ if (msg.img) { bub.style.background = 'transparent'; bub.style.boxShadow = 'none
   // Resolve a WeChat emoji's local image to an extension URL the page can load.
   function wechatEmojiUrl(emoji) {
     return chrome.runtime.getURL(emoji.path);
+  }
+  function wechatEmojiSendUrl(emoji) {
+    return 'https://simple-chatroom-pwa.963614893.workers.dev/emojis/' + emoji.path;
   }
 
   // Find a WeChat emoji by its name (the name is what gets sent as the message text).
@@ -828,11 +831,11 @@ if (msg.img) { bub.style.background = 'transparent'; bub.style.boxShadow = 'none
   // whether to show the unread indicator, so reading in tab A also clears tab B.
   function markUnread(msg) {
     if (!toggleBtn) return;
-    // Ask the background (which can access shared storage) whether this message id
-    // was already read in another tab. chrome.storage.session is not accessible
-    // from the content-script page context, so we go through the background.
     chrome.runtime.sendMessage({ action: 'isRead', id: msg.id }, function(resp) {
-      if (resp && resp.read) return;
+      if (resp && resp.read) {
+        if (hasUnread) clearUnreadLocal();
+        return;
+      }
       hasUnread = true;
       toggleBtn.style.background = '#ef4444';
       toggleBtn.style.color = '#fff';
