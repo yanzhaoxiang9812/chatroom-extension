@@ -1,0 +1,209 @@
+﻿// ChatRoom 666 - Content Script
+// Floating button on web pages, hover to show chat panel, mouse leave to hide
+
+(function() {
+  'use strict';
+
+  var myName = '';
+  var messageHistory = [];
+  var renderedCount = 0;
+  var widgetEl = null;
+  var toggleBtn = null;
+  var hideTimer = null;
+
+  function avatarLetter(name) { return name ? name.charAt(0).toUpperCase() : '?'; }
+  function fmtTime(ts) { var d = new Date(ts); return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
+
+  function createToggleButton() {
+    toggleBtn = document.createElement('div');
+    toggleBtn.id = 'chatroom666-toggle';
+    toggleBtn.style.cssText = 'position:fixed;bottom:20px;right:20px;width:44px;height:44px;border-radius:50%;background:#2a2a2a;color:#ccc;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2147483647;box-shadow:0 2px 10px rgba(0,0,0,.5);font-size:11px;font-weight:700;transition:transform .2s,background .2s;user-select:none;border:1px solid #444;';
+    toggleBtn.textContent = '666';
+    toggleBtn.title = 'ChatRoom 666';
+    toggleBtn.addEventListener('mouseenter', function() {
+      clearTimeout(hideTimer);
+      toggleBtn.style.transform = 'scale(1.08)';
+      toggleBtn.style.background = '#3a3a3a';
+      showWidget();
+    });
+    toggleBtn.addEventListener('mouseleave', function() {
+      scheduleHide();
+    });
+    document.body.appendChild(toggleBtn);
+  }
+
+  function createWidget() {
+    widgetEl = document.createElement('div');
+    widgetEl.id = 'chatroom666-widget';
+    widgetEl.style.cssText = 'position:fixed;bottom:72px;right:20px;width:300px;height:400px;background:#1a1a1a;border:1px solid #333;border-radius:10px;z-index:2147483647;display:none;flex-direction:column;box-shadow:0 6px 24px rgba(0,0,0,.6);overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
+
+    var header = document.createElement('div');
+    header.style.cssText = 'background:#222;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #333;flex-shrink:0;';
+    var title = document.createElement('span');
+    title.style.cssText = 'color:#aaa;font-size:12px;font-weight:700;';
+    title.textContent = 'Room 666';
+    var onlineSpan = document.createElement('span');
+    onlineSpan.id = 'chatroom666-online';
+    onlineSpan.style.cssText = 'color:#666;font-size:11px;';
+    onlineSpan.textContent = 'Online 0';
+    header.appendChild(title);
+    header.appendChild(onlineSpan);
+    widgetEl.appendChild(header);
+
+    var msgArea = document.createElement('div');
+    msgArea.id = 'chatroom666-msgs';
+    msgArea.style.cssText = 'flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;';
+    msgArea.style.cssText += '::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#333;border-radius:2px}';
+    widgetEl.appendChild(msgArea);
+
+    var inputArea = document.createElement('div');
+    inputArea.style.cssText = 'background:#222;border-top:1px solid #333;padding:8px 10px;display:flex;gap:6px;flex-shrink:0;';
+    var msgInput = document.createElement('input');
+    msgInput.id = 'chatroom666-input';
+    msgInput.type = 'text';
+    msgInput.placeholder = 'Type a message...';
+    msgInput.maxLength = 2000;
+    msgInput.style.cssText = 'flex:1;padding:8px 10px;border:1px solid #444;border-radius:6px;background:#111;color:#fff;font-size:12px;outline:none;';
+    msgInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); }
+    });
+    var sendBtn = document.createElement('button');
+    sendBtn.textContent = 'Send';
+    sendBtn.style.cssText = 'padding:8px 12px;border:none;border-radius:6px;background:#555;color:#fff;font-size:11px;font-weight:600;cursor:pointer;';
+    sendBtn.addEventListener('click', function() { sendMsg(); });
+    inputArea.appendChild(msgInput);
+    inputArea.appendChild(sendBtn);
+    widgetEl.appendChild(inputArea);
+
+    // Hover events on widget
+    widgetEl.addEventListener('mouseenter', function() { clearTimeout(hideTimer); });
+    widgetEl.addEventListener('mouseleave', function() { scheduleHide(); });
+
+    document.body.appendChild(widgetEl);
+  }
+
+  function showWidget() {
+    if (!widgetEl) createWidget();
+    widgetEl.style.display = 'flex';
+    if (renderedCount === 0) loadHistory();
+  }
+
+  function hideWidget() {
+    if (widgetEl) widgetEl.style.display = 'none';
+    if (toggleBtn) { toggleBtn.style.transform = 'scale(1)'; toggleBtn.style.background = '#2a2a2a'; }
+  }
+
+  function scheduleHide() {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(hideWidget, 500);
+  }
+
+  function loadHistory() {
+    chrome.runtime.sendMessage({ action: 'getStatus' }, function(resp) {
+      if (resp) {
+        myName = resp.myName || '';
+        messageHistory = resp.messageHistory || [];
+        renderedCount = messageHistory.length;
+        var msgArea = document.getElementById('chatroom666-msgs');
+        if (msgArea) {
+          msgArea.innerHTML = '';
+          messageHistory.forEach(function(msg) { renderMsg(msgArea, msg); });
+        }
+        var onlineEl = document.getElementById('chatroom666-online');
+        if (onlineEl) onlineEl.textContent = 'Online ' + (resp.onlineCount || 0);
+      }
+    });
+  }
+
+  function renderMsg(container, msg) {
+    var isSelf = msg.name === myName;
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:flex-start;gap:6px;max-width:85%;' + (isSelf ? 'align-self:flex-end;flex-direction:row-reverse;' : 'align-self:flex-start;');
+    var av = document.createElement('div');
+    av.style.cssText = 'width:24px;height:24px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;border:1px solid #444;';
+    av.textContent = avatarLetter(msg.name);
+    row.appendChild(av);
+    var body = document.createElement('div');
+    body.style.cssText = 'display:flex;flex-direction:column;gap:2px;';
+    var nm = document.createElement('span');
+    nm.style.cssText = 'font-size:10px;font-weight:600;color:#888;';
+    nm.textContent = isSelf ? 'You' : msg.name;
+    body.appendChild(nm);
+    var bub = document.createElement('div');
+    bub.style.cssText = 'padding:6px 10px;border-radius:10px;font-size:12px;line-height:1.4;word-break:break-word;' + (isSelf ? 'background:#3a3a3a;color:#fff;' : 'background:#2a2a2a;color:#e0e0e0;');
+    if (msg.img) {
+      var img = document.createElement('img');
+      img.src = msg.img;
+      img.style.cssText = 'max-width:140px;max-height:140px;border-radius:6px;';
+      bub.appendChild(img);
+    } else {
+      bub.textContent = msg.text;
+    }
+    body.appendChild(bub);
+    row.appendChild(body);
+    container.appendChild(row);
+    container.scrollTop = container.scrollHeight;
+  }
+
+  function sendMsg() {
+    var input = document.getElementById('chatroom666-input');
+    var text = input.value.trim();
+    if (!text) return;
+    chrome.runtime.sendMessage({ action: 'contentSendChat', text: text, img: null }, function() {
+      input.value = '';
+    });
+  }
+
+  // Port for real-time updates
+  var port = null;
+  function connectPort() {
+    port = chrome.runtime.connect({ name: 'chatroom666' });
+    port.onMessage.addListener(function(data) {
+      if (data.type === 'state') {
+        myName = data.myName || myName;
+        messageHistory = data.messageHistory || [];
+        renderedCount = messageHistory.length;
+        var msgArea = document.getElementById('chatroom666-msgs');
+        if (msgArea && widgetEl && widgetEl.style.display === 'flex') {
+          msgArea.innerHTML = '';
+          messageHistory.forEach(function(msg) { renderMsg(msgArea, msg); });
+        }
+        var onlineEl = document.getElementById('chatroom666-online');
+        if (onlineEl) onlineEl.textContent = 'Online ' + (data.onlineCount || 0);
+      } else if (data.type === 'message') {
+        var msgId = data.message.id;
+        var exists = false;
+        for (var i = messageHistory.length - 1; i >= 0; i--) {
+          if (messageHistory[i].id === msgId) { exists = true; break; }
+        }
+        if (!exists) {
+          messageHistory.push(data.message);
+          if (messageHistory.length > 200) messageHistory = messageHistory.slice(-200);
+          renderedCount = messageHistory.length;
+          var msgArea = document.getElementById('chatroom666-msgs');
+          if (msgArea && widgetEl && widgetEl.style.display === 'flex') {
+            renderMsg(msgArea, data.message);
+          }
+        }
+      }
+    });
+    port.onDisconnect.addListener(function() {
+      port = null;
+      setTimeout(connectPort, 2000);
+    });
+  }
+
+  function init() {
+    if (document.getElementById('chatroom666-toggle')) return;
+    createToggleButton();
+    connectPort();
+    chrome.runtime.sendMessage({ action: 'contentJoin' }, function() {});
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+
